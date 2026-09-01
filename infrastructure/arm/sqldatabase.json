@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "SQLLogin": {
+      "type": "string",
+      "metadata": {
+        "description": "Administrator login name for Azure SQL Server"
+      }
+    },
+    "SQLPassword": {
+      "type": "secureString",
+      "metadata": {
+        "description": "Administrator password for Azure SQL Server"
+      }
+    }
+  },
+  "variables": {
+    "sqlServerName": "[concat('sqlserver-', uniqueString(resourceGroup().id))]",
+    "databaseName": "appdb",
+    "location": "[resourceGroup().location]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Sql/servers",
+      "apiVersion": "2022-02-01-preview",
+      "name": "[variables('sqlServerName')]",
+      "location": "[variables('location')]",
+      "properties": {
+        "administratorLogin": "[parameters('SQLLogin')]",
+        "administratorLoginPassword": "[parameters('SQLPassword')]"
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers/databases",
+      "apiVersion": "2022-02-01-preview",
+      "name": "[format('{0}/{1}', variables('sqlServerName'), variables('databaseName'))]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
+      ],
+      "sku": {
+        "name": "Basic",
+        "tier": "Basic"
+      },
+      "properties": {}
+    },
+    {
+      "type": "Microsoft.Sql/servers/firewallRules",
+      "apiVersion": "2022-02-01-preview",
+      "name": "[format('{0}/{1}', variables('sqlServerName'), 'AllowAzureServices')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
+      ],
+      "properties": {
+        "startIpAddress": "0.0.0.0",
+        "endIpAddress": "0.0.0.0"
+      }
+    }
+  ],
+  "outputs": {
+    "sqlServerFqdn": {
+      "type": "string",
+      "value": "[reference(variables('sqlServerName')).fullyQualifiedDomainName]"
+    }
+  }
+}

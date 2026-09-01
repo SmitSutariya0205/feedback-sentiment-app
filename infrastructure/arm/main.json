@@ -1,240 +1,122 @@
 {
-    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-    "contentVersion": "1.0.0.0",
-    "parameters": {
-        "SQLLogin": {
-            "type": "string",
-            "defaultValue": "sqlusr",
-            "metadata": {
-                "description": "Admin username for Azure SQL Server"
-            }
-        },
-        "SQLPassword": {
-            "type": "secureString",
-            "defaultValue": "Azure@12345678",
-            "metadata": {
-                "description": "Admin password for Azure SQL Server"
-            }
-        },
-        "templateBaseUri": {
-            "type": "string",
-            "defaultValue": "https://raw.githubusercontent.com/SmitSutariya0205/feedback-sentiment-app/main/infrastructure/arm/",
-            "metadata": {
-                "description": "Base URI for linked template deployment"
-            }
-        }
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "webAppName": {
+      "type": "string",
+      "defaultValue": "[concat('webapp-', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "Name of the Azure Web App for Containers"
+      }
     },
-    "variables": {
-        "vnetName": "app-network",
-        "subnetName": "SubnetA",
-        "nsgName": "app-nsg",
-        "publicIpName": "app-ip",
-        "loadBalancerName": "app-balancer",
-        "backendPoolName": "app-pool"
+    "appServicePlanName": {
+      "type": "string",
+      "defaultValue": "plan-feedback-api",
+      "metadata": {
+        "description": "Name of the App Service Plan"
+      }
     },
-    "resources": [
-        {
-            "type": "Microsoft.Network/networkSecurityGroups",
-            "apiVersion": "2021-05-01",
-            "name": "[variables('nsgName')]",
-            "location": "[resourceGroup().location]",
-            "properties": {
-                "securityRules": [
-                    {
-                        "name": "Allow-HTTP",
-                        "properties": {
-                            "protocol": "Tcp",
-                            "sourcePortRange": "*",
-                            "destinationPortRange": "80",
-                            "sourceAddressPrefix": "*",
-                            "destinationAddressPrefix": "*",
-                            "access": "Allow",
-                            "priority": 100,
-                            "direction": "Inbound"
-                        }
-                    },
-                    {
-                        "name": "Allow-FastAPI",
-                        "properties": {
-                            "protocol": "Tcp",
-                            "sourcePortRange": "*",
-                            "destinationPortRange": "8000",
-                            "sourceAddressPrefix": "*",
-                            "destinationAddressPrefix": "*",
-                            "access": "Allow",
-                            "priority": 110,
-                            "direction": "Inbound"
-                        }
-                    },
-                    {
-                        "name": "Allow-RDP",
-                        "properties": {
-                            "protocol": "Tcp",
-                            "sourcePortRange": "*",
-                            "destinationPortRange": "3389",
-                            "sourceAddressPrefix": "*",
-                            "destinationAddressPrefix": "*",
-                            "access": "Allow",
-                            "priority": 200,
-                            "direction": "Inbound"
-                        }
-                    }
-                ]
-            }
-        },
-        {
-            "type": "Microsoft.Network/virtualNetworks",
-            "apiVersion": "2021-05-01",
-            "name": "[variables('vnetName')]",
-            "location": "[resourceGroup().location]",
-            "dependsOn": [
-                "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
-            ],
-            "properties": {
-                "addressSpace": {
-                    "addressPrefixes": [
-                        "10.0.0.0/16"
-                    ]
-                },
-                "subnets": [
-                    {
-                        "name": "[variables('subnetName')]",
-                        "properties": {
-                            "addressPrefix": "10.0.0.0/24",
-                            "networkSecurityGroup": {
-                                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
-                            }
-                        }
-                    }
-                ]
-            }
-        },
-        {
-            "type": "Microsoft.Network/publicIPAddresses",
-            "apiVersion": "2021-05-01",
-            "name": "[variables('publicIpName')]",
-            "location": "[resourceGroup().location]",
-            "sku": {
-                "name": "Standard"
-            },
-            "properties": {
-                "publicIPAllocationMethod": "Static",
-                "dnsSettings": {
-                    "domainNameLabel": "[concat('feedback-app-', uniqueString(resourceGroup().id))]"
-                }
-            }
-        },
-        {
-            "type": "Microsoft.Network/loadBalancers",
-            "apiVersion": "2021-05-01",
-            "name": "[variables('loadBalancerName')]",
-            "location": "[resourceGroup().location]",
-            "sku": {
-                "name": "Standard"
-            },
-            "dependsOn": [
-                "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName'))]"
-            ],
-            "properties": {
-                "frontendIPConfigurations": [
-                    {
-                        "name": "LoadBalancerFrontEnd",
-                        "properties": {
-                            "publicIPAddress": {
-                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName'))]"
-                            }
-                        }
-                    }
-                ],
-                "backendAddressPools": [
-                    {
-                        "name": "[variables('backendPoolName')]"
-                    }
-                ],
-                "loadBalancingRules": [
-                    {
-                        "name": "HTTPRule",
-                        "properties": {
-                            "frontendIPConfiguration": {
-                                "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('loadBalancerName'), 'LoadBalancerFrontEnd')]"
-                            },
-                            "backendAddressPool": {
-                                "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('loadBalancerName'), variables('backendPoolName'))]"
-                            },
-                            "protocol": "Tcp",
-                            "frontendPort": 80,
-                            "backendPort": 8000,
-                            "enableFloatingIP": false,
-                            "idleTimeoutInMinutes": 5,
-                            "probe": {
-                                "id": "[resourceId('Microsoft.Network/loadBalancers/probes', variables('loadBalancerName'), 'fastapiHealthProbe')]"
-                            }
-                        }
-                    }
-                ],
-                "probes": [
-                    {
-                        "name": "fastapiHealthProbe",
-                        "properties": {
-                            "protocol": "Http",
-                            "port": 8000,
-                            "requestPath": "/health",
-                            "intervalInSeconds": 5,
-                            "numberOfProbes": 2
-                        }
-                    }
-                ]
-            }
-        },
-        {
-            "type": "Microsoft.Resources/deployments",
-            "apiVersion": "2021-04-01",
-            "name": "LinkedSqlDeployment",
-            "properties": {
-                "mode": "Incremental",
-                "templateLink": {
-                    "uri": "[concat(parameters('templateBaseUri'), 'sql.json')]",
-                    "contentVersion": "1.0.0.0"
-                },
-                "parameters": {
-                    "SQLLogin": {
-                        "value": "[parameters('SQLLogin')]"
-                    },
-                    "SQLPassword": {
-                        "value": "[parameters('SQLPassword')]"
-                    }
-                }
-            }
-        },
-        {
-            "type": "Microsoft.Resources/deployments",
-            "apiVersion": "2021-04-01",
-            "name": "LinkedVmssDeployment",
-            "dependsOn": [
-                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
-                "[resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName'))]"
-            ],
-            "properties": {
-                "mode": "Incremental",
-                "templateLink": {
-                    "uri": "[concat(parameters('templateBaseUri'), 'vmss.json')]",
-                    "contentVersion": "1.0.0.0"
-                }
-            }
-        }
-    ],
-    "outputs": {
-        "loadBalancerPublicIP": {
-            "type": "string",
-            "value": "[reference(variables('publicIpName')).ipAddress]"
-        },
-        "loadBalancerFQDN": {
-            "type": "string",
-            "value": "[reference(variables('publicIpName')).dnsSettings.fqdn]"
-        },
-        "sqlServerFQDN": {
-            "type": "string",
-            "value": "[reference('LinkedSqlDeployment').outputs.sqlserverfqdn.value]"
-        }
+    "sku": {
+      "type": "string",
+      "defaultValue": "B1",
+      "metadata": {
+        "description": "App Service Plan SKU (B1 recommended for containers on Student Account)"
+      }
+    },
+    "dockerImage": {
+      "type": "string",
+      "defaultValue": "localregistry.azurecr.io/feedback-api-backend:latest",
+      "metadata": {
+        "description": "Full Docker image tag to run inside Web App"
+      }
+    },
+    "templateBlobUri": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/SmitSutariya0205/feedback-sentiment-app/main/infrastructure/arm/sqldatabase.json",
+      "metadata": {
+        "description": "URI for linked SQL ARM template"
+      }
+    },
+    "parametersBlobUri": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/SmitSutariya0205/feedback-sentiment-app/main/infrastructure/arm/sqldatabase-parameters.json",
+      "metadata": {
+        "description": "URI for linked SQL parameters template"
+      }
     }
+  },
+  "variables": {
+    "location": "[resourceGroup().location]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-03-01",
+      "name": "[parameters('appServicePlanName')]",
+      "location": "[variables('location')]",
+      "kind": "linux",
+      "properties": {
+        "reserved": true
+      },
+      "sku": {
+        "name": "[parameters('sku')]"
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-03-01",
+      "name": "[parameters('webAppName')]",
+      "location": "[variables('location')]",
+      "kind": "app,linux,container",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "siteConfig": {
+          "linuxFxVersion": "[concat('DOCKER|', parameters('dockerImage'))]",
+          "appSettings": [
+            {
+              "name": "WEBSITES_PORT",
+              "value": "8000"
+            },
+            {
+              "name": "API_BEARER_TOKEN",
+              "value": "dev-secret-token"
+            },
+            {
+              "name": "LOG_LEVEL",
+              "value": "INFO"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2021-04-01",
+      "name": "LinkedSqlTemplate",
+      "properties": {
+        "mode": "Incremental",
+        "templateLink": {
+          "uri": "[parameters('templateBlobUri')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parametersLink": {
+          "uri": "[parameters('parametersBlobUri')]",
+          "contentVersion": "1.0.0.0"
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "webAppUrl": {
+      "type": "string",
+      "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('webAppName'))).defaultHostName)]"
+    },
+    "sqlServerFqdn": {
+      "type": "string",
+      "value": "[reference('LinkedSqlTemplate').outputs.sqlServerFqdn.value]"
+    }
+  }
 }
