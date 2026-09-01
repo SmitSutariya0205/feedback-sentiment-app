@@ -1,0 +1,16 @@
+# Node dependencies & build artifacts
+node_modules/
+dist/
+coverage/
+
+# Environment files
+.env
+.env.local
+.env.example
+
+# Git & Editor files
+.git/
+.gitignore
+.vscode/
+.idea/
+README.md
