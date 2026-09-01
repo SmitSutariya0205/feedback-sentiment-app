@@ -1,0 +1,112 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {},
+    "variables": {
+        "vmssName": "app-set",
+        "vnetName": "app-network",
+        "loadBalancerName": "app-balancer",
+        "backendPoolName": "app-pool"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Compute/virtualMachineScaleSets",
+            "apiVersion": "2021-11-01",
+            "name": "[variables('vmssName')]",
+            "location": "[resourceGroup().location]",
+            "sku": {
+                "name": "Standard_B1s",
+                "tier": "Standard",
+                "capacity": 2
+            },
+            "properties": {
+                "overprovision": true,
+                "upgradePolicy": {
+                    "mode": "Automatic"
+                },
+                "singlePlacementGroup": true,
+                "platformFaultDomainCount": 2,
+                "virtualMachineProfile": {
+                    "storageProfile": {
+                        "osDisk": {
+                            "caching": "ReadWrite",
+                            "createOption": "FromImage"
+                        },
+                        "imageReference": {
+                            "publisher": "MicrosoftWindowsServer",
+                            "offer": "WindowsServer",
+                            "sku": "2019-Datacenter",
+                            "version": "latest"
+                        }
+                    },
+                    "osProfile": {
+                        "computerNamePrefix": "feedbackvm",
+                        "adminUsername": "demousr",
+                        "adminPassword": "Azure@12345678"
+                    },
+                    "extensionProfile": {
+                        "extensions": [
+                            {
+                                "name": "TeamServicesAgent",
+                                "properties": {
+                                    "publisher": "Microsoft.VisualStudio.Services",
+                                    "type": "TeamServicesAgent",
+                                    "typeHandlerVersion": "1.0",
+                                    "autoUpgradeMinorVersion": true,
+                                    "settings": {
+                                        "VSTSAccountName": "techsup4000",
+                                        "TeamProject": "DevOpsProject",
+                                        "DeploymentGroup": "Feedback-VMSS-Group"
+                                    },
+                                    "protectedSettings": {
+                                        "PATToken": "YOUR_PERSONAL_ACCESS_TOKEN_HERE"
+                                    }
+                                }
+                            },
+                            {
+                                "name": "config-app",
+                                "properties": {
+                                    "publisher": "Microsoft.Compute",
+                                    "type": "CustomScriptExtension",
+                                    "typeHandlerVersion": "1.10",
+                                    "autoUpgradeMinorVersion": true,
+                                    "settings": {
+                                        "fileUris": [
+                                            "https://raw.githubusercontent.com/SmitSutariya0205/feedback-sentiment-app/main/infrastructure/scripts/setup-vm.ps1"
+                                        ],
+                                        "commandToExecute": "powershell -ExecutionPolicy Unrestricted -File setup-vm.ps1"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    "networkProfile": {
+                        "networkInterfaceConfigurations": [
+                            {
+                                "name": "app-nic",
+                                "properties": {
+                                    "primary": true,
+                                    "ipConfigurations": [
+                                        {
+                                            "name": "ipConfig",
+                                            "properties": {
+                                                "subnet": {
+                                                    "id": "[reference(resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))).subnets[0].id]"
+                                                },
+                                                "loadBalancerBackendAddressPools": [
+                                                    {
+                                                        "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('loadBalancerName'), variables('backendPoolName'))]"
+                                                    }
+                                                ]
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    ]
+}
