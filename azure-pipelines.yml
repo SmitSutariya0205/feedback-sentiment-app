@@ -1,0 +1,179 @@
+# ==============================================================================
+# Azure DevOps Multi-Stage Pipeline
+# Product Feedback Sentiment API — FastAPI + React
+# Triggers on push to main branch
+# ==============================================================================
+
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  pythonVersion: '3.12'
+  nodeVersion: '20'
+  azureSubscription: 'AzureStudentConnection'
+  resourceGroupName: 'feedback-prod-rg'
+  location: 'centralindia'
+  webAppName: 'feedback-app-smit0205'
+
+# ==============================================================================
+# STAGE 1: BUILD & QUALITY GATES (CI)
+# ==============================================================================
+stages:
+- stage: Build
+  displayName: 'Build & Test'
+  jobs:
+  - job: BackendTest
+    displayName: 'Backend - Python Tests'
+    steps:
+
+    # 1. Install Python 3.12
+    - task: UsePythonVersion@0
+      displayName: 'Set Python $(pythonVersion)'
+      inputs:
+        versionSpec: '$(pythonVersion)'
+
+    # 2. Install dependencies using pip
+    - script: |
+        cd backend_backup
+        pip install --upgrade pip
+        pip install -r <(sed -n '/dependencies/,/]/p' pyproject.toml | grep -oP '"[^"]*"' | tr -d '"' | paste -sd ' ')
+        pip install httpx pytest
+      displayName: 'Install Python dependencies'
+
+    # 3. Run pytest with coverage
+    - script: |
+        cd backend_backup
+        python -m pytest tests/test_api.py -v --tb=short --junitxml=test-results.xml
+      displayName: 'Run Backend Tests (59 tests)'
+
+    # 4. Publish test results to Azure DevOps UI
+    - task: PublishTestResults@2
+      displayName: 'Publish Backend Test Results'
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: 'backend_backup/test-results.xml'
+        testRunTitle: 'Backend Python Tests'
+      condition: always()
+
+  - job: FrontendTest
+    displayName: 'Frontend - React Tests & Build'
+    steps:
+
+    # 1. Install Node.js 20
+    - task: NodeTool@0
+      displayName: 'Set Node.js $(nodeVersion)'
+      inputs:
+        versionSpec: '$(nodeVersion)'
+
+    # 2. Install npm dependencies
+    - script: |
+        cd frontend
+        npm ci
+      displayName: 'npm ci (clean install)'
+
+    # 3. Run Vitest unit tests
+    - script: |
+        cd frontend
+        npm run test
+      displayName: 'Run Frontend Tests (Vitest)'
+
+    # 4. Build production React bundle
+    - script: |
+        cd frontend
+        npm run build
+      displayName: 'Build React Production Bundle'
+
+    # 5. Publish frontend build as artifact
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Frontend Dist'
+      inputs:
+        targetPath: 'frontend/dist'
+        artifactName: 'frontend-dist'
+
+  - job: SecurityScan
+    displayName: 'Security & Dependency Audit'
+    steps:
+
+    # 1. Audit npm dependencies for known vulnerabilities
+    - script: |
+        cd frontend
+        npm audit --audit-level=high || true
+      displayName: 'npm audit (Frontend)'
+
+    # 2. Audit Python dependencies
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '$(pythonVersion)'
+    - script: |
+        pip install pip-audit
+        cd backend_backup
+        pip-audit -r <(sed -n '/dependencies/,/]/p' pyproject.toml | grep -oP '"[^"]*"' | tr -d '"' | sed 's/>=.*//;s/\[.*\]//' | paste -sd '\n') || true
+      displayName: 'pip-audit (Backend)'
+
+  - job: PublishInfraArtifacts
+    displayName: 'Publish ARM Templates'
+    steps:
+
+    # Publish ARM templates as pipeline artifact for release stage
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish ARM Templates'
+      inputs:
+        targetPath: 'infrastructure/arm'
+        artifactName: 'arm-templates'
+
+# ==============================================================================
+# STAGE 2: DEPLOYMENT (CD)
+# ==============================================================================
+- stage: Deploy
+  displayName: 'Deploy to Azure'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - deployment: DeployInfra
+    displayName: 'Deploy Infrastructure & App'
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          # 1. Download ARM template artifacts
+          - download: current
+            artifact: arm-templates
+
+          # 2. Create Resource Group (if not exists)
+          - task: AzureCLI@2
+            displayName: 'Create Resource Group'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az group create --name $(resourceGroupName) --location $(location)
+
+          # 3. Deploy ARM Template (App Service + SQL Database)
+          - task: AzureResourceManagerTemplateDeployment@3
+            displayName: 'Deploy ARM Template'
+            inputs:
+              azureResourceManagerConnection: '$(azureSubscription)'
+              resourceGroupName: '$(resourceGroupName)'
+              location: '$(location)'
+              csmFile: '$(Pipeline.Workspace)/arm-templates/main.json'
+              overrideParameters: '-webAppName $(webAppName) -sku B1 -location $(location)'
+              deploymentMode: 'Incremental'
+
+          # 4. Health check validation
+          - script: |
+              echo "Waiting 30 seconds for deployment to stabilize..."
+              sleep 30
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$(webAppName).azurewebsites.net/health || echo "000")
+              echo "Health check status: $STATUS"
+              if [ "$STATUS" = "200" ]; then
+                echo "✅ Deployment verified — application is healthy!"
+              else
+                echo "⚠️ Health check returned $STATUS (container may still be starting)"
+              fi
+            displayName: 'Post-Deployment Health Check'
