@@ -2,6 +2,13 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for all resources (e.g. centralindia)"
+      }
+    },
     "webAppName": {
       "type": "string",
       "defaultValue": "[concat('webapp-', uniqueString(resourceGroup().id))]",
@@ -45,15 +52,12 @@
       }
     }
   },
-  "variables": {
-    "location": "[resourceGroup().location]"
-  },
   "resources": [
     {
       "type": "Microsoft.Web/serverfarms",
       "apiVersion": "2022-03-01",
       "name": "[parameters('appServicePlanName')]",
-      "location": "[variables('location')]",
+      "location": "[parameters('location')]",
       "kind": "linux",
       "properties": {
         "reserved": true
@@ -66,7 +70,7 @@
       "type": "Microsoft.Web/sites",
       "apiVersion": "2022-03-01",
       "name": "[parameters('webAppName')]",
-      "location": "[variables('location')]",
+      "location": "[parameters('location')]",
       "kind": "app,linux,container",
       "dependsOn": [
         "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]"
