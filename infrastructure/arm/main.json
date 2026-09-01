@@ -30,11 +30,25 @@
         "description": "App Service Plan SKU (B1 recommended for containers on Student Account)"
       }
     },
+    "acrName": {
+      "type": "string",
+      "defaultValue": "[concat('acr', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "Azure Container Registry name (globally unique, lowercase, no dashes)"
+      }
+    },
+    "acrSku": {
+      "type": "string",
+      "defaultValue": "Basic",
+      "metadata": {
+        "description": "ACR SKU — Basic is cheapest for Student accounts"
+      }
+    },
     "dockerImage": {
       "type": "string",
-      "defaultValue": "localregistry.azurecr.io/feedback-api-backend:latest",
+      "defaultValue": "feedback-api-backend:latest",
       "metadata": {
-        "description": "Full Docker image tag to run inside Web App"
+        "description": "Docker image name:tag (ACR login server is prepended automatically)"
       }
     },
     "templateBlobUri": {
@@ -53,6 +67,18 @@
     }
   },
   "resources": [
+    {
+      "type": "Microsoft.ContainerRegistry/registries",
+      "apiVersion": "2023-01-01-preview",
+      "name": "[parameters('acrName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "[parameters('acrSku')]"
+      },
+      "properties": {
+        "adminUserEnabled": true
+      }
+    },
     {
       "type": "Microsoft.Web/serverfarms",
       "apiVersion": "2022-03-01",
@@ -73,16 +99,29 @@
       "location": "[parameters('location')]",
       "kind": "app,linux,container",
       "dependsOn": [
-        "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]"
+        "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]"
       ],
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
         "siteConfig": {
-          "linuxFxVersion": "[concat('DOCKER|', parameters('dockerImage'))]",
+          "linuxFxVersion": "[concat('DOCKER|', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))).loginServer, '/', parameters('dockerImage'))]",
           "appSettings": [
             {
               "name": "WEBSITES_PORT",
               "value": "8000"
+            },
+            {
+              "name": "DOCKER_REGISTRY_SERVER_URL",
+              "value": "[concat('https://', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))).loginServer)]"
+            },
+            {
+              "name": "DOCKER_REGISTRY_SERVER_USERNAME",
+              "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), '2023-01-01-preview').username]"
+            },
+            {
+              "name": "DOCKER_REGISTRY_SERVER_PASSWORD",
+              "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), '2023-01-01-preview').passwords[0].value]"
             },
             {
               "name": "API_BEARER_TOKEN",
@@ -117,6 +156,10 @@
     "webAppUrl": {
       "type": "string",
       "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('webAppName'))).defaultHostName)]"
+    },
+    "acrLoginServer": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))).loginServer]"
     },
     "sqlServerFqdn": {
       "type": "string",

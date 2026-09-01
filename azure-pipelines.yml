@@ -17,6 +17,9 @@ variables:
   resourceGroupName: 'feedback-prod-rg'
   location: 'centralindia'
   webAppName: 'feedback-app-smit0205'
+  imageRepository: 'feedback-api-backend'
+  dockerfilePath: 'backend_backup/Dockerfile'
+  tag: '$(Build.BuildId)'
 
 # ==============================================================================
 # STAGE 1: BUILD & QUALITY GATES (CI)
@@ -25,17 +28,16 @@ stages:
 - stage: Build
   displayName: 'Build & Test'
   jobs:
+
+  # ── Job 1: Backend Python Tests ────────────────────────────────────────────
   - job: BackendTest
     displayName: 'Backend - Python Tests'
     steps:
-
-    # 1. Install Python 3.12
     - task: UsePythonVersion@0
       displayName: 'Set Python $(pythonVersion)'
       inputs:
         versionSpec: '$(pythonVersion)'
 
-    # 2. Install dependencies using pip
     - script: |
         cd backend_backup
         pip install --upgrade pip
@@ -43,13 +45,11 @@ stages:
         pip install httpx pytest
       displayName: 'Install Python dependencies'
 
-    # 3. Run pytest with coverage
     - script: |
         cd backend_backup
         python -m pytest tests/test_api.py -v --tb=short --junitxml=test-results.xml
       displayName: 'Run Backend Tests (59 tests)'
 
-    # 4. Publish test results to Azure DevOps UI
     - task: PublishTestResults@2
       displayName: 'Publish Backend Test Results'
       inputs:
@@ -58,66 +58,98 @@ stages:
         testRunTitle: 'Backend Python Tests'
       condition: always()
 
+  # ── Job 2: Frontend React Tests & Build ────────────────────────────────────
   - job: FrontendTest
     displayName: 'Frontend - React Tests & Build'
     steps:
-
-    # 1. Install Node.js 20
     - task: NodeTool@0
       displayName: 'Set Node.js $(nodeVersion)'
       inputs:
         versionSpec: '$(nodeVersion)'
 
-    # 2. Install npm dependencies
     - script: |
         cd frontend
         npm ci
       displayName: 'npm ci (clean install)'
 
-    # 3. Run Vitest unit tests
     - script: |
         cd frontend
         npm run test
       displayName: 'Run Frontend Tests (Vitest)'
 
-    # 4. Build production React bundle
     - script: |
         cd frontend
         npm run build
       displayName: 'Build React Production Bundle'
 
-    # 5. Publish frontend build as artifact
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Frontend Dist'
       inputs:
         targetPath: 'frontend/dist'
         artifactName: 'frontend-dist'
 
+  # ── Job 3: Security & Dependency Audit ─────────────────────────────────────
   - job: SecurityScan
     displayName: 'Security & Dependency Audit'
     steps:
-
-    # 1. Audit npm dependencies for known vulnerabilities
     - script: |
         cd frontend
         npm audit --audit-level=high || true
       displayName: 'npm audit (Frontend)'
 
-    # 2. Audit Python dependencies
     - task: UsePythonVersion@0
       inputs:
         versionSpec: '$(pythonVersion)'
+
     - script: |
         pip install pip-audit
         cd backend_backup
         pip-audit -r <(sed -n '/dependencies/,/]/p' pyproject.toml | grep -oP '"[^"]*"' | tr -d '"' | sed 's/>=.*//;s/\[.*\]//' | paste -sd '\n') || true
       displayName: 'pip-audit (Backend)'
 
+  # ── Job 4: Docker Build & Push to ACR ──────────────────────────────────────
+  - job: DockerBuildPush
+    displayName: 'Docker Build & Push to ACR'
+    dependsOn:
+    - BackendTest
+    - FrontendTest
+    condition: succeeded()
+    steps:
+
+    # Login to ACR using Azure CLI
+    - task: AzureCLI@2
+      displayName: 'Get ACR Login Server'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Get ACR login server from the resource group
+          ACR_NAME=$(az acr list --resource-group $(resourceGroupName) --query "[0].name" -o tsv)
+          ACR_LOGIN_SERVER=$(az acr list --resource-group $(resourceGroupName) --query "[0].loginServer" -o tsv)
+          echo "##vso[task.setvariable variable=acrName]$ACR_NAME"
+          echo "##vso[task.setvariable variable=acrLoginServer]$ACR_LOGIN_SERVER"
+          echo "ACR found: $ACR_LOGIN_SERVER"
+
+    # Build and Push Docker image to ACR
+    - task: AzureCLI@2
+      displayName: 'Docker Build & Push'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az acr build \
+            --registry $(acrName) \
+            --image $(imageRepository):$(tag) \
+            --image $(imageRepository):latest \
+            --file $(dockerfilePath) \
+            backend_backup/
+
+  # ── Job 5: Publish ARM Templates ───────────────────────────────────────────
   - job: PublishInfraArtifacts
     displayName: 'Publish ARM Templates'
     steps:
-
-    # Publish ARM templates as pipeline artifact for release stage
     - task: PublishPipelineArtifact@1
       displayName: 'Publish ARM Templates'
       inputs:
@@ -154,7 +186,7 @@ stages:
               inlineScript: |
                 az group create --name $(resourceGroupName) --location $(location)
 
-          # 3. Deploy ARM Template (App Service + SQL Database)
+          # 3. Deploy ARM Template (ACR + App Service + SQL Database)
           - task: AzureResourceManagerTemplateDeployment@3
             displayName: 'Deploy ARM Template'
             inputs:
@@ -165,10 +197,32 @@ stages:
               overrideParameters: '-webAppName $(webAppName) -sku B1 -location $(location)'
               deploymentMode: 'Incremental'
 
-          # 4. Health check validation
+          # 4. Update Web App to use the freshly built Docker image from ACR
+          - task: AzureCLI@2
+            displayName: 'Update Web App Container Image'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                # Get ACR login server
+                ACR_LOGIN_SERVER=$(az acr list --resource-group $(resourceGroupName) --query "[0].loginServer" -o tsv)
+                echo "Updating Web App to image: $ACR_LOGIN_SERVER/$(imageRepository):$(tag)"
+
+                # Update the Web App container settings
+                az webapp config container set \
+                  --name $(webAppName) \
+                  --resource-group $(resourceGroupName) \
+                  --container-image-name "$ACR_LOGIN_SERVER/$(imageRepository):$(tag)" \
+                  --container-registry-url "https://$ACR_LOGIN_SERVER"
+
+                # Restart the Web App to pull the new image
+                az webapp restart --name $(webAppName) --resource-group $(resourceGroupName)
+
+          # 5. Health check validation
           - script: |
-              echo "Waiting 30 seconds for deployment to stabilize..."
-              sleep 30
+              echo "Waiting 60 seconds for container to start..."
+              sleep 60
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$(webAppName).azurewebsites.net/health || echo "000")
               echo "Health check status: $STATUS"
               if [ "$STATUS" = "200" ]; then
