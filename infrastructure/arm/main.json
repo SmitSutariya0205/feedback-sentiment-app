@@ -204,7 +204,7 @@
       "type": "Microsoft.Web/staticSites",
       "apiVersion": "2022-03-01",
       "name": "[parameters('staticWebAppName')]",
-      "location": "[parameters('location')]",
+      "location": "eastasia",
       "sku": {
         "name": "Free",
         "tier": "Free"
