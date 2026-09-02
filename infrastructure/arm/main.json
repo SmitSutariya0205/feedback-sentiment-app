@@ -34,7 +34,7 @@
       "type": "string",
       "defaultValue": "[concat('acr', uniqueString(resourceGroup().id))]",
       "metadata": {
-        "description": "Azure Container Registry name (globally unique, lowercase, no dashes)"
+        "description": "Azure Container Registry name"
       }
     },
     "acrSku": {
@@ -48,7 +48,7 @@
       "type": "string",
       "defaultValue": "feedback-api-backend:latest",
       "metadata": {
-        "description": "Docker image name:tag (ACR login server is prepended automatically)"
+        "description": "Docker image name:tag"
       }
     },
     "templateBlobUri": {
@@ -66,6 +66,9 @@
       }
     }
   },
+  "variables": {
+    "keyVaultName": "[concat('kv-', uniqueString(resourceGroup().id))]"
+  },
   "resources": [
     {
       "type": "Microsoft.ContainerRegistry/registries",
@@ -77,6 +80,45 @@
       },
       "properties": {
         "adminUserEnabled": true
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "enabledForTemplateDeployment": true,
+        "enabledForDeployment": true,
+        "enabledForDiskEncryption": true,
+        "tenantId": "[subscription().tenantId]",
+        "sku": {
+          "name": "standard",
+          "family": "A"
+        },
+        "accessPolicies": []
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2022-07-01",
+      "name": "[concat(variables('keyVaultName'), '/ApiBearerToken')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+      ],
+      "properties": {
+        "value": "dev-secret-token"
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2022-07-01",
+      "name": "[concat(variables('keyVaultName'), '/SqlPassword')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+      ],
+      "properties": {
+        "value": "Azure@123"
       }
     },
     {
@@ -98,9 +140,14 @@
       "name": "[parameters('webAppName')]",
       "location": "[parameters('location')]",
       "kind": "app,linux,container",
+      "identity": {
+        "type": "SystemAssigned"
+      },
       "dependsOn": [
         "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
-        "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]"
+        "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultName'), 'ApiBearerToken')]"
       ],
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
@@ -110,6 +157,14 @@
             {
               "name": "WEBSITES_PORT",
               "value": "8000"
+            },
+            {
+              "name": "API_BEARER_TOKEN",
+              "value": "[concat('@Microsoft.KeyVault(VaultName=', variables('keyVaultName'), ';SecretName=ApiBearerToken)')]"
+            },
+            {
+              "name": "LOG_LEVEL",
+              "value": "INFO"
             },
             {
               "name": "DOCKER_REGISTRY_SERVER_URL",
@@ -122,17 +177,32 @@
             {
               "name": "DOCKER_REGISTRY_SERVER_PASSWORD",
               "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), '2023-01-01-preview').passwords[0].value]"
-            },
-            {
-              "name": "API_BEARER_TOKEN",
-              "value": "dev-secret-token"
-            },
-            {
-              "name": "LOG_LEVEL",
-              "value": "INFO"
             }
           ]
         }
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/accessPolicies",
+      "apiVersion": "2022-07-01",
+      "name": "[concat(variables('keyVaultName'), '/add')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ],
+      "properties": {
+        "accessPolicies": [
+          {
+            "tenantId": "[subscription().tenantId]",
+            "objectId": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2022-03-01', 'Full').identity.principalId]",
+            "permissions": {
+              "secrets": [
+                "get",
+                "list"
+              ]
+            }
+          }
+        ]
       }
     },
     {
@@ -156,6 +226,10 @@
     "webAppUrl": {
       "type": "string",
       "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('webAppName'))).defaultHostName)]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "value": "[variables('keyVaultName')]"
     },
     "acrLoginServer": {
       "type": "string",
