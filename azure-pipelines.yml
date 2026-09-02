@@ -25,8 +25,6 @@ variables:
   imageRepository: 'feedback-api-backend'
   dockerfilePath: 'backend_backup/Dockerfile'
   tag: '$(Build.BuildId)'
-  # NOTE: apiBearerToken, sqlLogin, sqlPassword are set as SECRET
-  # variables in the Azure DevOps pipeline UI — never in this YAML file.
 
 # ==============================================================================
 # STAGE 1: BUILD & QUALITY GATES (CI)
@@ -115,46 +113,7 @@ stages:
         pip-audit || true
       displayName: 'pip-audit (Backend)'
 
-  # ── Job 4: Docker Build & Push to ACR ──────────────────────────────────────
-  - job: DockerBuildPush
-    displayName: 'Docker Build & Push to ACR'
-    dependsOn:
-    - BackendTest
-    - FrontendTest
-    condition: succeeded()
-    steps:
-
-    # Login to ACR using Azure CLI
-    - task: AzureCLI@2
-      displayName: 'Get ACR Login Server'
-      inputs:
-        azureSubscription: '$(azureSubscription)'
-        scriptType: 'bash'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          # Get ACR login server from the resource group
-          ACR_NAME=$(az acr list --resource-group $(resourceGroupName) --query "[0].name" -o tsv)
-          ACR_LOGIN_SERVER=$(az acr list --resource-group $(resourceGroupName) --query "[0].loginServer" -o tsv)
-          echo "##vso[task.setvariable variable=acrName]$ACR_NAME"
-          echo "##vso[task.setvariable variable=acrLoginServer]$ACR_LOGIN_SERVER"
-          echo "ACR found: $ACR_LOGIN_SERVER"
-
-    # Build and Push Docker image to ACR
-    - task: AzureCLI@2
-      displayName: 'Docker Build & Push'
-      inputs:
-        azureSubscription: '$(azureSubscription)'
-        scriptType: 'bash'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          az acr build \
-            --registry $(acrName) \
-            --image $(imageRepository):$(tag) \
-            --image $(imageRepository):latest \
-            --file $(dockerfilePath) \
-            backend_backup/
-
-  # ── Job 5: Publish ARM Templates ───────────────────────────────────────────
+  # ── Job 4: Publish ARM Templates ───────────────────────────────────────────
   - job: PublishInfraArtifacts
     displayName: 'Publish ARM Templates'
     steps:
@@ -194,7 +153,7 @@ stages:
               inlineScript: |
                 az group create --name $(resourceGroupName) --location $(location)
 
-          # 3. Deploy ARM Template (ACR + App Service + SQL Database)
+          # 3. Deploy ARM Template (ACR + Key Vault + App Service + SQL Database)
           - task: AzureResourceManagerTemplateDeployment@3
             displayName: 'Deploy ARM Template'
             inputs:
@@ -205,7 +164,27 @@ stages:
               overrideParameters: '-webAppName $(webAppName) -sku B1 -location $(location) -apiBearerToken $(apiBearerToken) -sqlLogin $(sqlLogin) -sqlPassword $(sqlPassword)'
               deploymentMode: 'Incremental'
 
-          # 4. Update Web App to use the freshly built Docker image from ACR
+          # 4. Build & Push Docker image directly to the newly created ACR
+          - task: AzureCLI@2
+            displayName: 'Docker Build & Push to ACR'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                # Get ACR name from the resource group
+                ACR_NAME=$(az acr list --resource-group $(resourceGroupName) --query "[0].name" -o tsv)
+                echo "Target ACR Registry: $ACR_NAME"
+
+                # Build & push container image directly in Azure ACR
+                az acr build \
+                  --registry $ACR_NAME \
+                  --image $(imageRepository):$(tag) \
+                  --image $(imageRepository):latest \
+                  --file $(dockerfilePath) \
+                  backend_backup/
+
+          # 5. Update Web App container image & restart
           - task: AzureCLI@2
             displayName: 'Update Web App Container Image'
             inputs:
@@ -213,24 +192,21 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                # Get ACR login server
                 ACR_LOGIN_SERVER=$(az acr list --resource-group $(resourceGroupName) --query "[0].loginServer" -o tsv)
                 echo "Updating Web App to image: $ACR_LOGIN_SERVER/$(imageRepository):$(tag)"
 
-                # Update the Web App container settings
                 az webapp config container set \
                   --name $(webAppName) \
                   --resource-group $(resourceGroupName) \
                   --container-image-name "$ACR_LOGIN_SERVER/$(imageRepository):$(tag)" \
                   --container-registry-url "https://$ACR_LOGIN_SERVER"
 
-                # Restart the Web App to pull the new image
                 az webapp restart --name $(webAppName) --resource-group $(resourceGroupName)
 
-          # 5. Health check validation
+          # 6. Health check validation
           - script: |
-              echo "Waiting 60 seconds for container to start..."
-              sleep 60
+              echo "Waiting 45 seconds for container to start..."
+              sleep 45
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$(webAppName).azurewebsites.net/health || echo "000")
               echo "Health check status: $STATUS"
               if [ "$STATUS" = "200" ]; then
