@@ -139,6 +139,9 @@ stages:
         deploy:
           steps:
 
+          # 0. Checkout Git repository code
+          - checkout: self
+
           # 1. Download ARM template artifacts
           - download: current
             artifact: arm-templates
