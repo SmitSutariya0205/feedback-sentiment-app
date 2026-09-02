@@ -6,7 +6,7 @@
       "type": "string",
       "defaultValue": "[resourceGroup().location]",
       "metadata": {
-        "description": "Azure region for all resources (e.g. centralindia)"
+        "description": "Azure region for resources"
       }
     },
     "webAppName": {
@@ -16,11 +16,11 @@
         "description": "Name of the Backend Web App for Containers"
       }
     },
-    "frontendWebAppName": {
+    "staticWebAppName": {
       "type": "string",
-      "defaultValue": "[concat('frontend-', uniqueString(resourceGroup().id))]",
+      "defaultValue": "[concat('staticweb-', uniqueString(resourceGroup().id))]",
       "metadata": {
-        "description": "Name of the Frontend React Web App for Containers"
+        "description": "Name of the Azure Static Web App for React frontend"
       }
     },
     "appServicePlanName": {
@@ -34,7 +34,7 @@
       "type": "string",
       "defaultValue": "B1",
       "metadata": {
-        "description": "App Service Plan SKU (B1 recommended for containers on Student Account)"
+        "description": "App Service Plan SKU (B1 recommended for backend container on Student Account)"
       }
     },
     "acrName": {
@@ -56,13 +56,6 @@
       "defaultValue": "feedback-api-backend:latest",
       "metadata": {
         "description": "Backend Docker image name:tag"
-      }
-    },
-    "dockerImageFrontend": {
-      "type": "string",
-      "defaultValue": "feedback-api-frontend:latest",
-      "metadata": {
-        "description": "Frontend Docker image name:tag"
       }
     },
     "apiBearerToken": {
@@ -208,42 +201,21 @@
       }
     },
     {
-      "type": "Microsoft.Web/sites",
+      "type": "Microsoft.Web/staticSites",
       "apiVersion": "2022-03-01",
-      "name": "[parameters('frontendWebAppName')]",
+      "name": "[parameters('staticWebAppName')]",
       "location": "[parameters('location')]",
-      "kind": "app,linux,container",
-      "dependsOn": [
-        "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
-        "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
-        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
-      ],
+      "sku": {
+        "name": "Free",
+        "tier": "Free"
+      },
       "properties": {
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
-        "siteConfig": {
-          "linuxFxVersion": "[concat('DOCKER|', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))).loginServer, '/', parameters('dockerImageFrontend'))]",
-          "appSettings": [
-            {
-              "name": "WEBSITES_PORT",
-              "value": "80"
-            },
-            {
-              "name": "VITE_API_BASE_URL",
-              "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('webAppName'))).defaultHostName)]"
-            },
-            {
-              "name": "DOCKER_REGISTRY_SERVER_URL",
-              "value": "[concat('https://', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))).loginServer)]"
-            },
-            {
-              "name": "DOCKER_REGISTRY_SERVER_USERNAME",
-              "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), '2023-01-01-preview').username]"
-            },
-            {
-              "name": "DOCKER_REGISTRY_SERVER_PASSWORD",
-              "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), '2023-01-01-preview').passwords[0].value]"
-            }
-          ]
+        "repositoryUrl": "https://github.com/SmitSutariya0205/feedback-sentiment-app",
+        "branch": "main",
+        "buildProperties": {
+          "appLocation": "frontend",
+          "apiLocation": "",
+          "appArtifactLocation": "dist"
         }
       }
     },
@@ -299,9 +271,9 @@
       "type": "string",
       "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('webAppName'))).defaultHostName)]"
     },
-    "frontendUrl": {
+    "staticWebAppUrl": {
       "type": "string",
-      "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('frontendWebAppName'))).defaultHostName)]"
+      "value": "[concat('https://', reference(resourceId('Microsoft.Web/staticSites', parameters('staticWebAppName'))).defaultHostname)]"
     },
     "keyVaultName": {
       "type": "string",
