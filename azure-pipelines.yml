@@ -47,8 +47,8 @@ stages:
 
     - script: |
         cd backend_backup
-        pip install --upgrade pip
-        pip install -r <(sed -n '/dependencies/,/]/p' pyproject.toml | grep -oP '"[^"]*"' | tr -d '"' | paste -sd ' ')
+        pip install --upgrade pip uv
+        uv pip install --system -r pyproject.toml
         pip install httpx pytest
       displayName: 'Install Python dependencies'
 
@@ -109,9 +109,10 @@ stages:
         versionSpec: '$(pythonVersion)'
 
     - script: |
-        pip install pip-audit
+        pip install pip-audit uv
         cd backend_backup
-        pip-audit -r <(sed -n '/dependencies/,/]/p' pyproject.toml | grep -oP '"[^"]*"' | tr -d '"' | sed 's/>=.*//;s/\[.*\]//' | paste -sd '\n') || true
+        uv pip install --system -r pyproject.toml
+        pip-audit || true
       displayName: 'pip-audit (Backend)'
 
   # ── Job 4: Docker Build & Push to ACR ──────────────────────────────────────
