@@ -167,7 +167,7 @@ stages:
               overrideParameters: '-webAppName $(webAppName) -sku B1 -location $(location) -apiBearerToken $(apiBearerToken) -sqlLogin $(sqlLogin) -sqlPassword $(sqlPassword)'
               deploymentMode: 'Incremental'
 
-          # 4. Build & Push Docker image directly to the newly created ACR
+          # 4. Build & Push Docker image using agent Docker engine (student-account compliant)
           - task: AzureCLI@2
             displayName: 'Docker Build & Push to ACR'
             inputs:
@@ -175,17 +175,24 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                # Get ACR name from the resource group
+                # Get ACR name & login server
                 ACR_NAME=$(az acr list --resource-group $(resourceGroupName) --query "[0].name" -o tsv)
-                echo "Target ACR Registry: $ACR_NAME"
+                ACR_LOGIN_SERVER=$(az acr list --resource-group $(resourceGroupName) --query "[0].loginServer" -o tsv)
+                echo "Target ACR Registry: $ACR_LOGIN_SERVER"
 
-                # Build & push container image directly in Azure ACR
-                az acr build \
-                  --registry $ACR_NAME \
-                  --image $(imageRepository):$(tag) \
-                  --image $(imageRepository):latest \
-                  --file $(dockerfilePath) \
+                # Login to ACR via Docker
+                az acr login --name $ACR_NAME
+
+                # Build Docker image using agent runner
+                docker build \
+                  -t $ACR_LOGIN_SERVER/$(imageRepository):$(tag) \
+                  -t $ACR_LOGIN_SERVER/$(imageRepository):latest \
+                  -f $(dockerfilePath) \
                   backend_backup/
+
+                # Push Docker image to ACR
+                docker push $ACR_LOGIN_SERVER/$(imageRepository):$(tag)
+                docker push $ACR_LOGIN_SERVER/$(imageRepository):latest
 
           # 5. Update Web App container image & restart
           - task: AzureCLI@2
