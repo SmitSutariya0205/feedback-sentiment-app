@@ -11,9 +11,16 @@
     },
     "webAppName": {
       "type": "string",
-      "defaultValue": "[concat('webapp-', uniqueString(resourceGroup().id))]",
+      "defaultValue": "[concat('backend-', uniqueString(resourceGroup().id))]",
       "metadata": {
-        "description": "Name of the Azure Web App for Containers"
+        "description": "Name of the Backend Web App for Containers"
+      }
+    },
+    "frontendWebAppName": {
+      "type": "string",
+      "defaultValue": "[concat('frontend-', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "Name of the Frontend React Web App for Containers"
       }
     },
     "appServicePlanName": {
@@ -44,29 +51,36 @@
         "description": "ACR SKU — Basic is cheapest for Student accounts"
       }
     },
-    "dockerImage": {
+    "dockerImageBackend": {
       "type": "string",
       "defaultValue": "feedback-api-backend:latest",
       "metadata": {
-        "description": "Docker image name:tag"
+        "description": "Backend Docker image name:tag"
+      }
+    },
+    "dockerImageFrontend": {
+      "type": "string",
+      "defaultValue": "feedback-api-frontend:latest",
+      "metadata": {
+        "description": "Frontend Docker image name:tag"
       }
     },
     "apiBearerToken": {
       "type": "secureString",
       "metadata": {
-        "description": "Bearer token for API authentication — passed from Azure DevOps pipeline secret variable"
+        "description": "Bearer token for API authentication"
       }
     },
     "sqlLogin": {
       "type": "string",
       "metadata": {
-        "description": "SQL Server admin login — passed from Azure DevOps pipeline variable"
+        "description": "SQL Server admin login"
       }
     },
     "sqlPassword": {
       "type": "secureString",
       "metadata": {
-        "description": "SQL Server admin password — passed from Azure DevOps pipeline secret variable"
+        "description": "SQL Server admin password"
       }
     },
     "templateBlobUri": {
@@ -163,7 +177,7 @@
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
         "siteConfig": {
-          "linuxFxVersion": "[concat('DOCKER|', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))).loginServer, '/', parameters('dockerImage'))]",
+          "linuxFxVersion": "[concat('DOCKER|', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))).loginServer, '/', parameters('dockerImageBackend'))]",
           "appSettings": [
             {
               "name": "WEBSITES_PORT",
@@ -176,6 +190,46 @@
             {
               "name": "LOG_LEVEL",
               "value": "INFO"
+            },
+            {
+              "name": "DOCKER_REGISTRY_SERVER_URL",
+              "value": "[concat('https://', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))).loginServer)]"
+            },
+            {
+              "name": "DOCKER_REGISTRY_SERVER_USERNAME",
+              "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), '2023-01-01-preview').username]"
+            },
+            {
+              "name": "DOCKER_REGISTRY_SERVER_PASSWORD",
+              "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), '2023-01-01-preview').passwords[0].value]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-03-01",
+      "name": "[parameters('frontendWebAppName')]",
+      "location": "[parameters('location')]",
+      "kind": "app,linux,container",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "siteConfig": {
+          "linuxFxVersion": "[concat('DOCKER|', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))).loginServer, '/', parameters('dockerImageFrontend'))]",
+          "appSettings": [
+            {
+              "name": "WEBSITES_PORT",
+              "value": "80"
+            },
+            {
+              "name": "VITE_API_BASE_URL",
+              "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('webAppName'))).defaultHostName)]"
             },
             {
               "name": "DOCKER_REGISTRY_SERVER_URL",
@@ -241,9 +295,13 @@
     }
   ],
   "outputs": {
-    "webAppUrl": {
+    "backendUrl": {
       "type": "string",
       "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('webAppName'))).defaultHostName)]"
+    },
+    "frontendUrl": {
+      "type": "string",
+      "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('frontendWebAppName'))).defaultHostName)]"
     },
     "keyVaultName": {
       "type": "string",

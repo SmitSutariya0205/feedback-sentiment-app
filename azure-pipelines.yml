@@ -21,9 +21,10 @@ variables:
   azureSubscription: 'AzureStudentConnection'
   resourceGroupName: 'feedback-prod-rg'
   location: 'centralindia'
-  webAppName: 'feedback-app-smit0205'
-  imageRepository: 'feedback-api-backend'
-  dockerfilePath: 'backend_backup/Dockerfile'
+  webAppName: 'feedback-backend-smit0205'
+  frontendWebAppName: 'feedback-frontend-smit0205'
+  backendImageRepo: 'feedback-api-backend'
+  frontendImageRepo: 'feedback-api-frontend'
   tag: '$(Build.BuildId)'
 
 # ==============================================================================
@@ -132,7 +133,7 @@ stages:
   condition: succeeded()
   jobs:
   - deployment: DeployInfra
-    displayName: 'Deploy Infrastructure & App'
+    displayName: 'Deploy Infrastructure & Apps'
     environment: 'production'
     strategy:
       runOnce:
@@ -156,7 +157,7 @@ stages:
               inlineScript: |
                 az group create --name $(resourceGroupName) --location $(location)
 
-          # 3. Deploy ARM Template (ACR + Key Vault + App Service + SQL Database)
+          # 3. Deploy ARM Template (ACR + Key Vault + Backend App + Frontend App + SQL Database)
           - task: AzureResourceManagerTemplateDeployment@3
             displayName: 'Deploy ARM Template'
             inputs:
@@ -164,64 +165,87 @@ stages:
               resourceGroupName: '$(resourceGroupName)'
               location: '$(location)'
               csmFile: '$(Pipeline.Workspace)/arm-templates/main.json'
-              overrideParameters: '-webAppName $(webAppName) -sku B1 -location $(location) -apiBearerToken $(apiBearerToken) -sqlLogin $(sqlLogin) -sqlPassword $(sqlPassword)'
+              overrideParameters: '-webAppName $(webAppName) -frontendWebAppName $(frontendWebAppName) -sku B1 -location $(location) -apiBearerToken $(apiBearerToken) -sqlLogin $(sqlLogin) -sqlPassword $(sqlPassword)'
               deploymentMode: 'Incremental'
 
-          # 4. Build & Push Docker image using agent Docker engine (student-account compliant)
+          # 4. Build & Push BOTH Docker images (Backend & Frontend) to ACR
           - task: AzureCLI@2
-            displayName: 'Docker Build & Push to ACR'
+            displayName: 'Docker Build & Push (Backend & Frontend)'
             inputs:
               azureSubscription: '$(azureSubscription)'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                # Get ACR name & login server
+                # Get ACR login server
                 ACR_NAME=$(az acr list --resource-group $(resourceGroupName) --query "[0].name" -o tsv)
                 ACR_LOGIN_SERVER=$(az acr list --resource-group $(resourceGroupName) --query "[0].loginServer" -o tsv)
                 echo "Target ACR Registry: $ACR_LOGIN_SERVER"
 
-                # Login to ACR via Docker
                 az acr login --name $ACR_NAME
 
-                # Build Docker image using agent runner
+                # 🐳 1. Build & Push Backend Container Image
+                echo "Building Backend Container..."
                 docker build \
-                  -t $ACR_LOGIN_SERVER/$(imageRepository):$(tag) \
-                  -t $ACR_LOGIN_SERVER/$(imageRepository):latest \
-                  -f $(dockerfilePath) \
+                  -t $ACR_LOGIN_SERVER/$(backendImageRepo):$(tag) \
+                  -t $ACR_LOGIN_SERVER/$(backendImageRepo):latest \
+                  -f backend_backup/Dockerfile \
                   backend_backup/
 
-                # Push Docker image to ACR
-                docker push $ACR_LOGIN_SERVER/$(imageRepository):$(tag)
-                docker push $ACR_LOGIN_SERVER/$(imageRepository):latest
+                docker push $ACR_LOGIN_SERVER/$(backendImageRepo):$(tag)
+                docker push $ACR_LOGIN_SERVER/$(backendImageRepo):latest
 
-          # 5. Update Web App container image & restart
+                # 🐳 2. Build & Push Frontend Nginx+React Container Image
+                echo "Building Frontend Container..."
+                docker build \
+                  -t $ACR_LOGIN_SERVER/$(frontendImageRepo):$(tag) \
+                  -t $ACR_LOGIN_SERVER/$(frontendImageRepo):latest \
+                  -f frontend/Dockerfile \
+                  frontend/
+
+                docker push $ACR_LOGIN_SERVER/$(frontendImageRepo):$(tag)
+                docker push $ACR_LOGIN_SERVER/$(frontendImageRepo):latest
+
+          # 5. Update Web App containers & restart
           - task: AzureCLI@2
-            displayName: 'Update Web App Container Image'
+            displayName: 'Update Web App Containers'
             inputs:
               azureSubscription: '$(azureSubscription)'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
                 ACR_LOGIN_SERVER=$(az acr list --resource-group $(resourceGroupName) --query "[0].loginServer" -o tsv)
-                echo "Updating Web App to image: $ACR_LOGIN_SERVER/$(imageRepository):$(tag)"
 
+                # Update Backend Web App
+                echo "Updating Backend Web App container..."
                 az webapp config container set \
                   --name $(webAppName) \
                   --resource-group $(resourceGroupName) \
-                  --container-image-name "$ACR_LOGIN_SERVER/$(imageRepository):$(tag)" \
+                  --container-image-name "$ACR_LOGIN_SERVER/$(backendImageRepo):$(tag)" \
                   --container-registry-url "https://$ACR_LOGIN_SERVER"
 
                 az webapp restart --name $(webAppName) --resource-group $(resourceGroupName)
 
+                # Update Frontend Web App
+                echo "Updating Frontend Web App container..."
+                az webapp config container set \
+                  --name $(frontendWebAppName) \
+                  --resource-group $(resourceGroupName) \
+                  --container-image-name "$ACR_LOGIN_SERVER/$(frontendImageRepo):$(tag)" \
+                  --container-registry-url "https://$ACR_LOGIN_SERVER"
+
+                az webapp restart --name $(frontendWebAppName) --resource-group $(resourceGroupName)
+
           # 6. Health check validation
           - script: |
-              echo "Waiting 45 seconds for container to start..."
+              echo "Waiting 45 seconds for containers to start..."
               sleep 45
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$(webAppName).azurewebsites.net/health || echo "000")
-              echo "Health check status: $STATUS"
-              if [ "$STATUS" = "200" ]; then
-                echo "✅ Deployment verified — application is healthy!"
+              BACKEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$(webAppName).azurewebsites.net/health || echo "000")
+              FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$(frontendWebAppName).azurewebsites.net/ || echo "000")
+              echo "Backend health check: $BACKEND_STATUS"
+              echo "Frontend health check: $FRONTEND_STATUS"
+              if [ "$BACKEND_STATUS" = "200" ] && [ "$FRONTEND_STATUS" = "200" ]; then
+                echo "✅ Full Stack Deployment verified — both Backend and Frontend are healthy!"
               else
-                echo "⚠️ Health check returned $STATUS (container may still be starting)"
+                echo "⚠️ Check completed: Backend $BACKEND_STATUS, Frontend $FRONTEND_STATUS"
               fi
             displayName: 'Post-Deployment Health Check'
