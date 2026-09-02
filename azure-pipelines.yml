@@ -2,6 +2,11 @@
 # Azure DevOps Multi-Stage Pipeline
 # Product Feedback Sentiment API — FastAPI + React
 # Triggers on push to main branch
+#
+# REQUIRED SECRET VARIABLES (set in Azure DevOps UI → Pipelines → Edit → Variables):
+#   apiBearerToken  — API Bearer token (mark as secret)
+#   sqlLogin        — SQL admin username (mark as secret)
+#   sqlPassword     — SQL admin password (mark as secret)
 # ==============================================================================
 
 trigger:
@@ -20,6 +25,8 @@ variables:
   imageRepository: 'feedback-api-backend'
   dockerfilePath: 'backend_backup/Dockerfile'
   tag: '$(Build.BuildId)'
+  # NOTE: apiBearerToken, sqlLogin, sqlPassword are set as SECRET
+  # variables in the Azure DevOps pipeline UI — never in this YAML file.
 
 # ==============================================================================
 # STAGE 1: BUILD & QUALITY GATES (CI)
@@ -194,7 +201,7 @@ stages:
               resourceGroupName: '$(resourceGroupName)'
               location: '$(location)'
               csmFile: '$(Pipeline.Workspace)/arm-templates/main.json'
-              overrideParameters: '-webAppName $(webAppName) -sku B1 -location $(location)'
+              overrideParameters: '-webAppName $(webAppName) -sku B1 -location $(location) -apiBearerToken $(apiBearerToken) -sqlLogin $(sqlLogin) -sqlPassword $(sqlPassword)'
               deploymentMode: 'Incremental'
 
           # 4. Update Web App to use the freshly built Docker image from ACR

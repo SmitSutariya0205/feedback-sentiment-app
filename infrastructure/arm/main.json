@@ -51,18 +51,29 @@
         "description": "Docker image name:tag"
       }
     },
+    "apiBearerToken": {
+      "type": "secureString",
+      "metadata": {
+        "description": "Bearer token for API authentication — passed from Azure DevOps pipeline secret variable"
+      }
+    },
+    "sqlLogin": {
+      "type": "string",
+      "metadata": {
+        "description": "SQL Server admin login — passed from Azure DevOps pipeline variable"
+      }
+    },
+    "sqlPassword": {
+      "type": "secureString",
+      "metadata": {
+        "description": "SQL Server admin password — passed from Azure DevOps pipeline secret variable"
+      }
+    },
     "templateBlobUri": {
       "type": "string",
       "defaultValue": "https://raw.githubusercontent.com/SmitSutariya0205/feedback-sentiment-app/main/infrastructure/arm/sqldatabase.json",
       "metadata": {
         "description": "URI for linked SQL ARM template"
-      }
-    },
-    "parametersBlobUri": {
-      "type": "string",
-      "defaultValue": "https://raw.githubusercontent.com/SmitSutariya0205/feedback-sentiment-app/main/infrastructure/arm/sqldatabase-parameters.json",
-      "metadata": {
-        "description": "URI for linked SQL parameters template"
       }
     }
   },
@@ -107,7 +118,7 @@
         "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
       ],
       "properties": {
-        "value": "dev-secret-token"
+        "value": "[parameters('apiBearerToken')]"
       }
     },
     {
@@ -118,7 +129,7 @@
         "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
       ],
       "properties": {
-        "value": "Azure@123"
+        "value": "[parameters('sqlPassword')]"
       }
     },
     {
@@ -215,9 +226,16 @@
           "uri": "[parameters('templateBlobUri')]",
           "contentVersion": "1.0.0.0"
         },
-        "parametersLink": {
-          "uri": "[parameters('parametersBlobUri')]",
-          "contentVersion": "1.0.0.0"
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "SQLLogin": {
+            "value": "[parameters('sqlLogin')]"
+          },
+          "SQLPassword": {
+            "value": "[parameters('sqlPassword')]"
+          }
         }
       }
     }
