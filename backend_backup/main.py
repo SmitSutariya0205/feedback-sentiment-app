@@ -25,7 +25,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-from config import LOG_BACKUP_COUNT, LOG_FILE_PATH, LOG_LEVEL, LOG_MAX_BYTES
+from config import ALLOWED_ORIGINS, LOG_BACKUP_COUNT, LOG_FILE_PATH, LOG_LEVEL, LOG_MAX_BYTES
 from context import request_id_ctx
 from database import Base, engine
 from exceptions import (
@@ -167,11 +167,23 @@ app.add_middleware(CombinedMiddleware)
 # and can handle preflight OPTIONS requests before auth checks
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+# ── Security Headers Middleware ──────────────────────────────────────────────────
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    """Inject standard OWASP security headers into all responses."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 # ── Exception handlers ────────────────────────────────────────────────────────────
 # Registration order: least-specific first so more-specific handlers take priority.

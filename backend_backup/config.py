@@ -23,6 +23,21 @@ LOG_BACKUP_COUNT: int = 3
 # ── Metrics ─────────────────────────────────────────────────────────────────────
 METRICS_CSV_PATH: str = os.getenv("METRICS_CSV_PATH", "metrics.csv")
 
+# ── CORS Origins ─────────────────────────────────────────────────────────────────
+# Whitelist of allowed client origins for CORS requests.
+# Override in production via the ALLOWED_ORIGINS environment variable (comma-separated).
+_DEFAULT_ORIGINS = (
+    "https://orange-mud-08d0cc600.5.azurestaticapps.net,"
+    "https://feedback-frontend-smit0205.azurestaticapps.net,"
+    "http://localhost:5173,"
+    "http://localhost:3000"
+)
+ALLOWED_ORIGINS: list[str] = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", _DEFAULT_ORIGINS).split(",")
+    if origin.strip()
+]
+
 # ── Public paths (exempt from Bearer token auth and middleware logging) ─────────
 # Add any new unauthenticated routes here.
 PUBLIC_PATHS: set[str] = {
