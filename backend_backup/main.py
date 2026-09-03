@@ -17,7 +17,17 @@ Responsibilities:
 
 import logging
 import logging.handlers
+import os
 from contextlib import asynccontextmanager
+
+# ── Azure Application Insights OpenTelemetry Setup ─────────────────────────────
+_ai_connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+if _ai_connection_string:
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+        configure_azure_monitor(connection_string=_ai_connection_string)
+    except Exception:
+        pass
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
