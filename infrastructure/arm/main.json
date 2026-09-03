@@ -85,9 +85,37 @@
     }
   },
   "variables": {
-    "keyVaultName": "[concat('kv-', uniqueString(resourceGroup().id))]"
+    "keyVaultName": "[concat('kv-', uniqueString(resourceGroup().id))]",
+    "logAnalyticsName": "[concat('law-', uniqueString(resourceGroup().id))]",
+    "appInsightsName": "[concat('appinsights-', uniqueString(resourceGroup().id))]"
   },
   "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2022-10-01",
+      "name": "[variables('logAnalyticsName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": 30
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('appInsightsName')]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ],
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      }
+    },
     {
       "type": "Microsoft.ContainerRegistry/registries",
       "apiVersion": "2023-01-01-preview",
@@ -165,7 +193,8 @@
         "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
         "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
         "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-        "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultName'), 'ApiBearerToken')]"
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultName'), 'ApiBearerToken')]",
+        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]"
       ],
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
@@ -183,6 +212,14 @@
             {
               "name": "LOG_LEVEL",
               "value": "INFO"
+            },
+            {
+              "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
+            },
+            {
+              "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
+              "value": "~3"
             },
             {
               "name": "DOCKER_REGISTRY_SERVER_URL",
@@ -274,6 +311,14 @@
     "staticWebAppUrl": {
       "type": "string",
       "value": "[concat('https://', reference(resourceId('Microsoft.Web/staticSites', parameters('staticWebAppName'))).defaultHostname)]"
+    },
+    "appInsightsName": {
+      "type": "string",
+      "value": "[variables('appInsightsName')]"
+    },
+    "appInsightsConnectionString": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
     },
     "keyVaultName": {
       "type": "string",
