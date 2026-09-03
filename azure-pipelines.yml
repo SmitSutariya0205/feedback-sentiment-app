@@ -52,7 +52,7 @@ stages:
       displayName: 'Install Python dependencies & pytest-cov'
 
     # 1. Prepare SonarCloud analysis (CLI scanner)
-    - task: SonarCloudPrepare@1
+    - task: SonarCloudPrepare@2
       displayName: 'Prepare SonarCloud Analysis'
       inputs:
         SonarCloud: 'SonarCloudConnection'
@@ -77,12 +77,12 @@ stages:
       condition: always()
 
     # 3. Run SonarCloud Static Code Analysis
-    - task: SonarCloudAnalyze@1
+    - task: SonarCloudAnalyze@2
       displayName: 'Run SonarCloud Analysis'
       continueOnError: true
 
     # 4. Publish Quality Gate Results
-    - task: SonarCloudPublish@1
+    - task: SonarCloudPublish@2
       displayName: 'Publish SonarCloud Quality Gate'
       inputs:
         pollingTimeoutSec: '300'
