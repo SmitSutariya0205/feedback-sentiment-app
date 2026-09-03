@@ -11,10 +11,12 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from config import DB_URL
 
+connect_args = {"check_same_thread": False} if DB_URL.startswith("sqlite") else {}
+
 engine = create_engine(
     DB_URL,
-    connect_args={"check_same_thread": False},  # SQLite-specific; safe for our use case
-    echo=False,  # Set True to log all SQL statements (very verbose)
+    connect_args=connect_args,
+    echo=False,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
