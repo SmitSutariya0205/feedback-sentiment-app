@@ -35,9 +35,9 @@ stages:
   displayName: 'Build & Test'
   jobs:
 
-  # ── Job 1: Backend Python Tests ────────────────────────────────────────────
+  # ── Job 1: Backend Python Tests & SonarCloud Analysis ─────────────────────
   - job: BackendTest
-    displayName: 'Backend - Python Tests'
+    displayName: 'Backend - Python Tests & SonarCloud'
     steps:
     - task: UsePythonVersion@0
       displayName: 'Set Python $(pythonVersion)'
@@ -48,13 +48,25 @@ stages:
         cd backend_backup
         pip install --upgrade pip uv
         uv pip install --system -r pyproject.toml
-        pip install httpx pytest
-      displayName: 'Install Python dependencies'
+        pip install httpx pytest pytest-cov
+      displayName: 'Install Python dependencies & pytest-cov'
 
+    # 1. Prepare SonarCloud analysis (CLI scanner)
+    - task: SonarCloudPrepare@1
+      displayName: 'Prepare SonarCloud Analysis'
+      inputs:
+        SonarCloud: 'SonarCloudConnection'
+        organization: 'smitsutariya0205'
+        scannerMode: 'CLI'
+        configMode: 'file'
+        configFile: 'sonar-project.properties'
+      continueOnError: true
+
+    # 2. Run pytest with JUnit results + XML Cobertura coverage
     - script: |
         cd backend_backup
-        python -m pytest tests/test_api.py -v --tb=short --junitxml=test-results.xml
-      displayName: 'Run Backend Tests (59 tests)'
+        python -m pytest tests/test_api.py -v --tb=short --junitxml=test-results.xml --cov=. --cov-report=xml:coverage.xml
+      displayName: 'Run Backend Tests & Generate Coverage (59 tests)'
 
     - task: PublishTestResults@2
       displayName: 'Publish Backend Test Results'
@@ -63,6 +75,18 @@ stages:
         testResultsFiles: 'backend_backup/test-results.xml'
         testRunTitle: 'Backend Python Tests'
       condition: always()
+
+    # 3. Run SonarCloud Static Code Analysis
+    - task: SonarCloudAnalyze@1
+      displayName: 'Run SonarCloud Analysis'
+      continueOnError: true
+
+    # 4. Publish Quality Gate Results
+    - task: SonarCloudPublish@1
+      displayName: 'Publish SonarCloud Quality Gate'
+      inputs:
+        pollingTimeoutSec: '300'
+      continueOnError: true
 
   # ── Job 2: Frontend React Tests & Static Build ─────────────────────────────
   - job: FrontendTest
