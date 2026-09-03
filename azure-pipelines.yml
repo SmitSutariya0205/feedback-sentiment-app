@@ -85,7 +85,7 @@ stages:
 
     - script: |
         cd frontend
-        npm run build
+        VITE_API_BASE_URL=https://$(webAppName).azurewebsites.net npm run build
       displayName: 'Build Production React Static Bundle (dist)'
 
     - task: PublishPipelineArtifact@1
