@@ -26,6 +26,12 @@ import logging
 import secrets
 import time
 
+try:
+    from opentelemetry import trace as otel_trace
+    _HAS_OTEL = True
+except ImportError:
+    _HAS_OTEL = False
+
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -74,6 +80,13 @@ class CombinedMiddleware(BaseHTTPMiddleware):
         request.state.request_id = initial_request_id
         request_id_ctx.set(initial_request_id)
 
+        # ── Attach request_id to the active OpenTelemetry span ────────────────
+        if _HAS_OTEL:
+            span = otel_trace.get_current_span()
+            if span and span.is_recording():
+                span.set_attribute("request_id", initial_request_id)
+                span.set_attribute("http.client_ip", client_ip)
+
         logger.info(f"Request started | method={method} path={path} ip={client_ip}")
 
         # ── Step 3: Start timer ──────────────────────────────────────────────────
@@ -101,6 +114,18 @@ class CombinedMiddleware(BaseHTTPMiddleware):
                 execution_time_ms = (time.perf_counter() - t_start) * 1000
                 request_id = getattr(request.state, "request_id", "N/A")
                 request_id_ctx.set(request_id)
+
+                # ── Update span with final request_id (POST sets it in handler) ───
+                if _HAS_OTEL:
+                    span = otel_trace.get_current_span()
+                    if span and span.is_recording():
+                        span.set_attribute("request_id", request_id)
+                        sentiment = getattr(request.state, "sentiment_label", None)
+                        confidence = getattr(request.state, "confidence_score", None)
+                        if sentiment:
+                            span.set_attribute("sentiment_label", sentiment)
+                        if confidence is not None:
+                            span.set_attribute("confidence_score", confidence)
 
                 # ── Step 6: Log request end ──────────────────────────────────────
                 logger.info(
